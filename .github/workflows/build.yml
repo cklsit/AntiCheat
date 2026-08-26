@@ -44,12 +44,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
@@ -74,7 +74,7 @@ jobs:
           </settings>" > ~/.m2/settings.xml
 
       - name: Cache Maven dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.m2/repository
@@ -85,7 +85,7 @@ jobs:
             maven-
 
       - name: Cache frontend (node/npm/dist)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.m2/repository/com/github/eirslett
@@ -141,7 +141,7 @@ jobs:
           cat ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
 
       - name: Upload build report (${{ matrix.api-name }})
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: build-report-${{ matrix.api }}
           path: ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
@@ -149,7 +149,7 @@ jobs:
 
       - name: Upload JAR artifact (${{ matrix.api-name }})
         if: matrix.api == 'paper'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: AdvancedAntiCheat-${{ github.sha }}
           path: target/*.jar
@@ -176,10 +176,10 @@ jobs:
     if: always()
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download build reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: ${{ env.BUILD_REPORT_DIR }}
 
@@ -229,7 +229,7 @@ jobs:
           cat ${{ env.BUILD_REPORT_DIR }}/build-summary.txt
 
       - name: Upload summary report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: build-summary
           path: ${{ env.BUILD_REPORT_DIR }}/build-summary.txt
