@@ -84,24 +84,30 @@ jobs:
             maven-${{ hashFiles('**/pom.xml') }}-
             maven-
 
+      - name: Cache frontend (node/npm/dist)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository/com/github/eirslett
+            web-panel/node_modules
+            web-panel/dist
+          key: frontend-${{ hashFiles('web-panel/package.json', 'web-panel/package-lock.json') }}
+          restore-keys: |
+            frontend-
+
       - name: Validate pom.xml (${{ matrix.api-name }})
-        run: mvn validate -q -P${{ matrix.profile }}
+        run: mvn validate -P${{ matrix.profile }}
         continue-on-error: false
 
-      - name: Compile project (${{ matrix.api-name }})
-        run: mvn compile -q -P${{ matrix.profile }}
-        continue-on-error: false
-        id: compile
-
-      - name: Run unit tests (${{ matrix.api-name }})
-        run: mvn test -q -P${{ matrix.profile }}
-        continue-on-error: true
-        id: unit-tests
-
-      - name: Package project (${{ matrix.api-name }})
-        run: mvn package -DskipTests -q -P${{ matrix.profile }}
+      - name: Package project (builds frontend + Java + shade) (${{ matrix.api-name }})
+        run: mvn clean package -DskipTests -P${{ matrix.profile }}
         continue-on-error: false
         id: package
+
+      - name: Run unit tests (${{ matrix.api-name }})
+        run: mvn test -P${{ matrix.profile }}
+        continue-on-error: true
+        id: unit-tests
 
       - name: Generate build report (${{ matrix.api-name }})
         run: |
@@ -119,13 +125,12 @@ jobs:
           echo "" >> ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
           echo "=== Build Steps ===" >> ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
           echo "Validate: Success" >> ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
-          echo "Compile: Success" >> ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
+          echo "Package (Frontend + Java + Shade): Success" >> ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
           if [ "${{ steps.unit-tests.outcome }}" = "success" ]; then
             echo "Unit Tests: Success" >> ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
           else
             echo "Unit Tests: Failed" >> ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
           fi
-          echo "Package: Success" >> ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
           echo "" >> ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
           echo "=== Build Artifacts ===" >> ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
           ls -la target/*.jar >> ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt 2>/dev/null || echo "No JAR files found" >> ${{ env.BUILD_REPORT_DIR }}/build-report-${{ matrix.api }}.txt
@@ -199,7 +204,7 @@ jobs:
               fi
               echo "" >> ${{ env.BUILD_REPORT_DIR }}/build-summary.txt
               echo "--- $api_name ---" >> ${{ env.BUILD_REPORT_DIR }}/build-summary.txt
-              grep -E "(Validate|Compile|Unit Tests|Package):" "${{ env.BUILD_REPORT_DIR }}/build-report-${api}/build-report-${api}.txt" >> ${{ env.BUILD_REPORT_DIR }}/build-summary.txt
+              grep -E "(Validate|Package|Unit Tests):" "${{ env.BUILD_REPORT_DIR }}/build-report-${api}/build-report-${api}.txt" >> ${{ env.BUILD_REPORT_DIR }}/build-summary.txt
             fi
           done
           

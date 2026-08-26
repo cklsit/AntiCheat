@@ -1,8 +1,8 @@
 name: AdvancedAntiCheat
-version: 1.0.0
+version: 2.1.0
 main: com.anticheat.AdvancedAntiCheat
 api-version: 1.21
-description: 高级反作弊插件，支持自动封禁、玩家举报系统和跨服务器数据库同步
+description: 高级反作弊插件，支持自动封禁、玩家举报系统、跨服务器数据库同步与内嵌 Web 管理面板
 author: AntiCheatTeam
 website: https://github.com/cklsit/AntiCheat
 

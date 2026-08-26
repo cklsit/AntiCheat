@@ -56,3 +56,17 @@ TestRunner.ps1
 
 # Web dashboard (not ready)
 web-dashboard/
+
+# Web panel (frontend)
+web-panel/node_modules/
+web-panel/dist/
+web-panel/.DS_Store
+web-panel/coverage/
+web-panel/*.local
+
+# npm cache
+.npm
+.cache/
+
+# Dispatch / local API test files
+dispatch.json
