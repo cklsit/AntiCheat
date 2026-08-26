@@ -52,3 +52,47 @@ check-client:
 bounty:
   enabled: true
   default-time-limit-minutes: 30
+
+# Web 管理面板配置
+# 插件启动时自动启动内嵌 HTTP+WS 服务器，访问 http://<server-ip>:<port>/ 即打开面板
+# 默认账号 admin/admin（明文），生产部署请用 /ac genpwd <新密码> 生成 bcrypt 哈希替换
+web:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
+  session-timeout-minutes: 120
+  cors:
+    enabled: false
+  auth:
+    accounts:
+      - username: "admin"
+        # bcrypt 哈希，明文为 "admin"
+        password-hash: "$2a$10$N9qo8uLOickgx2ZMRZoMy4IjkyYbN7UuLpJ3y3oXZ7p1C4Ra0Km8O"
+        role: "admin"
+        permissions:
+          - "*"
+      - username: "moderator"
+        password-hash: "$2a$10$N9qo8uLOickgx2ZMRZoMy4IjkyYbN7UuLpJ3y3oXZ7p1C4Ra0Km8O"
+        role: "mod"
+        permissions:
+          - "players:*"
+          - "cases:*"
+          - "dashboard:*"
+          - "audit:read"
+          - "notifications:*"
+      - username: "reviewer"
+        password-hash: "$2a$10$N9qo8uLOickgx2ZMRZoMy4IjkyYbN7UuLpJ3y3oXZ7p1C4Ra0Km8O"
+        role: "reviewer"
+        permissions:
+          - "cases:read"
+          - "cases:verdict"
+          - "dashboard:read"
+          - "audit:read"
+          - "notifications:read"
+      - username: "observer"
+        password-hash: "$2a$10$N9qo8uLOickgx2ZMRZoMy4IjkyYbN7UuLpJ3y3oXZ7p1C4Ra0Km8O"
+        role: "observer"
+        permissions:
+          - "dashboard:read"
+          - "players:read"
+          - "notifications:read"

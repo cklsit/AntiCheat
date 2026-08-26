@@ -3,6 +3,7 @@ package com.anticheat.commands;
 import com.anticheat.AdvancedAntiCheat;
 import com.anticheat.gui.ProfileGUI;
 import com.anticheat.managers.ReportManager;
+import com.anticheat.web.util.PasswordHasher;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -35,6 +36,10 @@ public class AntiCheatCommand implements CommandExecutor {
         if (subCommand.equals("reload")) {
             plugin.reloadConfig();
             plugin.getConfigManager().reloadMessagesConfig();
+            // 同步 AuthManager 配置（reloadConfig 内部已触发，再保险一次）
+            if (plugin.getAuthManager() != null) {
+                plugin.getAuthManager().reload();
+            }
             sender.sendMessage("§a[AntiCheat] 配置和消息文件已重新加载！");
         } else if (subCommand.equals("stats")) {
             showStats(sender);
@@ -44,6 +49,8 @@ public class AntiCheatCommand implements CommandExecutor {
             showHelp(sender);
         } else if (subCommand.equals("profile")) {
             handleProfile(sender, args);
+        } else if (subCommand.equals("genpwd")) {
+            handleGenpwd(sender, args);
         } else {
             sender.sendMessage("§c未知子命令！使用 /ac help 查看帮助");
         }
@@ -61,6 +68,7 @@ public class AntiCheatCommand implements CommandExecutor {
         sender.sendMessage(" §a/ac stats           §7- 查看检测统计信息");
         sender.sendMessage(" §a/ac reports         §7- 查看待处理举报列表");
         sender.sendMessage(" §a/ac profile <玩家>  §7- 查看玩家档案");
+        sender.sendMessage(" §a/ac genpwd <密码>   §7- 生成 Web 面板 bcrypt 哈希");
         sender.sendMessage(" §a/ac help            §7- 显示此帮助信息");
         sender.sendMessage("");
         sender.sendMessage(" §6玩家命令:");
@@ -158,5 +166,25 @@ public class AntiCheatCommand implements CommandExecutor {
 
         ProfileGUI gui = new ProfileGUI(plugin, plugin.getProfileGUIListener());
         gui.openProfileGUI(viewer, target);
+    }
+
+    /**
+     * /ac genpwd <明文密码>：输出 bcrypt 哈希，方便用户填入 config.yml 的 web.auth.accounts[].password-hash。
+     */
+    private void handleGenpwd(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage("§c用法: /ac genpwd <明文密码>");
+            return;
+        }
+        String plain = args[1];
+        String hash = PasswordHasher.hash(plain);
+        if (hash == null) {
+            sender.sendMessage("§c生成哈希失败，请检查控制台日志");
+            return;
+        }
+        sender.sendMessage("§a[AntiCheat] Web 面板密码哈希已生成：");
+        sender.sendMessage("§7明文: §f" + plain);
+        sender.sendMessage("§7hash: §6" + hash);
+        sender.sendMessage("§7将上述 hash 填入 config.yml 的 web.auth.accounts[].password-hash 字段，然后执行 /ac reload");
     }
 }

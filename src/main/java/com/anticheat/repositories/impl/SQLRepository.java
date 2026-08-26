@@ -1,6 +1,8 @@
 package com.anticheat.repositories.impl;
 
 import com.anticheat.managers.BanManager.BanRecord;
+import com.anticheat.managers.audit.AuditQuery;
+import com.anticheat.managers.audit.AuditRecord;
 import com.anticheat.repositories.DatabaseRepository;
 
 import java.sql.*;
@@ -144,7 +146,150 @@ public class SQLRepository implements DatabaseRepository {
         }
         return null;
     }
-    
+
+    // ===== 审计日志 =====
+
+    @Override
+    public void ensureAuditTable() {
+        try (Statement stmt = connection.createStatement()) {
+            // SQLite/H2 兼容写法：INTEGER PRIMARY KEY AUTOINCREMENT；
+            // MySQL 环境下也兼容（其接受 INTEGER 与 AUTOINCREMENT 列别名）
+            stmt.execute("CREATE TABLE IF NOT EXISTS audit_logs ("
+                    + "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    + "timestamp BIGINT NOT NULL, "
+                    + "operator VARCHAR(64), "
+                    + "operator_role INTEGER, "
+                    + "type VARCHAR(64), "
+                    + "target VARCHAR(128), "
+                    + "ip VARCHAR(64), "
+                    + "result VARCHAR(16), "
+                    + "detail TEXT"
+                    + ")");
+            try {
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_audit_operator ON audit_logs(operator)");
+                stmt.execute("CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_logs(type)");
+            } catch (SQLException ignored) {
+                // 部分方言对 IF NOT EXISTS 不支持，忽略
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("创建审计表失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void saveAudit(AuditRecord audit) {
+        String sql = "INSERT INTO audit_logs "
+                + "(timestamp, operator, operator_role, type, target, ip, result, detail) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement pstmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            pstmt.setLong(1, audit.getTimestamp());
+            pstmt.setString(2, audit.getOperator());
+            pstmt.setInt(3, audit.getOperatorRole());
+            pstmt.setString(4, audit.getType());
+            pstmt.setString(5, audit.getTarget());
+            pstmt.setString(6, audit.getIp());
+            pstmt.setString(7, audit.getResult());
+            pstmt.setString(8, audit.getDetail());
+            pstmt.executeUpdate();
+            try (ResultSet keys = pstmt.getGeneratedKeys()) {
+                if (keys.next()) {
+                    audit.setId(keys.getLong(1));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("保存审计记录失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<AuditRecord> queryAudits(AuditQuery query) {
+        StringBuilder sql = new StringBuilder("SELECT * FROM audit_logs WHERE 1=1");
+        List<Object> params = new ArrayList<>();
+        appendWhere(sql, params, query);
+        sql.append(" ORDER BY timestamp DESC");
+        int offset = (query.getPage() - 1) * query.getPageSize();
+        sql.append(" LIMIT ? OFFSET ?");
+        params.add(query.getPageSize());
+        params.add(offset);
+
+        List<AuditRecord> list = new ArrayList<>();
+        try (PreparedStatement pstmt = connection.prepareStatement(sql.toString())) {
+            for (int i = 0; i < params.size(); i++) {
+                pstmt.setObject(i + 1, params.get(i));
+            }
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    list.add(mapRow(rs));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("查询审计记录失败: " + e.getMessage(), e);
+        }
+        return list;
+    }
+
+    @Override
+    public long countAudits(AuditQuery query) {
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM audit_logs WHERE 1=1");
+        List<Object> params = new ArrayList<>();
+        appendWhere(sql, params, query);
+        try (PreparedStatement pstmt = connection.prepareStatement(sql.toString())) {
+            for (int i = 0; i < params.size(); i++) {
+                pstmt.setObject(i + 1, params.get(i));
+            }
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getLong(1);
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("统计审计记录失败: " + e.getMessage(), e);
+        }
+        return 0;
+    }
+
+    private void appendWhere(StringBuilder sql, List<Object> params, AuditQuery q) {
+        if (q == null) return;
+        if (q.getType() != null && !q.getType().isEmpty()) {
+            sql.append(" AND type = ?");
+            params.add(q.getType());
+        }
+        if (q.getResult() != null && !q.getResult().isEmpty()) {
+            sql.append(" AND result = ?");
+            params.add(q.getResult());
+        }
+        if (q.getStartTime() != null) {
+            sql.append(" AND timestamp >= ?");
+            params.add(q.getStartTime());
+        }
+        if (q.getEndTime() != null) {
+            sql.append(" AND timestamp <= ?");
+            params.add(q.getEndTime());
+        }
+        if (q.getKeyword() != null && !q.getKeyword().isEmpty()) {
+            sql.append(" AND (operator LIKE ? OR target LIKE ? OR detail LIKE ?)");
+            String kw = "%" + q.getKeyword() + "%";
+            params.add(kw);
+            params.add(kw);
+            params.add(kw);
+        }
+    }
+
+    private AuditRecord mapRow(ResultSet rs) throws SQLException {
+        AuditRecord r = new AuditRecord();
+        r.setId(rs.getLong("id"));
+        r.setTimestamp(rs.getLong("timestamp"));
+        r.setOperator(rs.getString("operator"));
+        r.setOperatorRole(rs.getInt("operator_role"));
+        r.setType(rs.getString("type"));
+        r.setTarget(rs.getString("target"));
+        r.setIp(rs.getString("ip"));
+        r.setResult(rs.getString("result"));
+        r.setDetail(rs.getString("detail"));
+        return r;
+    }
+
     @Override
     public void close() {
         try {

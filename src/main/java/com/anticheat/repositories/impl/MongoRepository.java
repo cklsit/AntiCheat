@@ -1,11 +1,15 @@
 package com.anticheat.repositories.impl;
 
 import com.anticheat.managers.BanManager.BanRecord;
+import com.anticheat.managers.audit.AuditQuery;
+import com.anticheat.managers.audit.AuditRecord;
 import com.anticheat.repositories.DatabaseRepository;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
+import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.UpdateOptions;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -150,7 +154,120 @@ public class MongoRepository implements DatabaseRepository {
         }
         return null;
     }
-    
+
+    // ===== 审计日志 =====
+
+    @Override
+    public void ensureAuditTable() {
+        // MongoDB 无 schema，集合按写入时自动创建
+        try {
+            mongoDatabase.getCollection("audit_logs");
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Override
+    public void saveAudit(AuditRecord audit) {
+        try {
+            MongoCollection<Document> collection = mongoDatabase.getCollection("audit_logs");
+            Document doc = new Document()
+                    .append("timestamp", audit.getTimestamp())
+                    .append("operator", audit.getOperator())
+                    .append("operator_role", audit.getOperatorRole())
+                    .append("type", audit.getType())
+                    .append("target", audit.getTarget())
+                    .append("ip", audit.getIp())
+                    .append("result", audit.getResult())
+                    .append("detail", audit.getDetail());
+            collection.insertOne(doc);
+            if (audit.getId() == null && doc.get("_id") != null) {
+                audit.setId(((Number) doc.get("_id")).longValue());
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("保存审计记录MongoDB失败: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<AuditRecord> queryAudits(AuditQuery query) {
+        List<AuditRecord> list = new ArrayList<>();
+        try {
+            MongoCollection<Document> collection = mongoDatabase.getCollection("audit_logs");
+            Bson filter = buildMongoFilter(query);
+            int skip = (query.getPage() - 1) * query.getPageSize();
+            try (MongoCursor<Document> cursor = collection.find(filter)
+                    .sort(new Document("timestamp", -1))
+                    .skip(skip)
+                    .limit(query.getPageSize())
+                    .iterator()) {
+                while (cursor.hasNext()) {
+                    list.add(mapDocument(cursor.next()));
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("查询审计记录MongoDB失败: " + e.getMessage(), e);
+        }
+        return list;
+    }
+
+    @Override
+    public long countAudits(AuditQuery query) {
+        try {
+            MongoCollection<Document> collection = mongoDatabase.getCollection("audit_logs");
+            return collection.countDocuments(buildMongoFilter(query));
+        } catch (Exception e) {
+            throw new RuntimeException("统计审计记录MongoDB失败: " + e.getMessage(), e);
+        }
+    }
+
+    private Bson buildMongoFilter(AuditQuery q) {
+        List<Bson> filters = new ArrayList<>();
+        if (q == null) {
+            return new Document();
+        }
+        if (q.getType() != null && !q.getType().isEmpty()) {
+            filters.add(Filters.eq("type", q.getType()));
+        }
+        if (q.getResult() != null && !q.getResult().isEmpty()) {
+            filters.add(Filters.eq("result", q.getResult()));
+        }
+        if (q.getStartTime() != null) {
+            filters.add(Filters.gte("timestamp", q.getStartTime()));
+        }
+        if (q.getEndTime() != null) {
+            filters.add(Filters.lte("timestamp", q.getEndTime()));
+        }
+        if (q.getKeyword() != null && !q.getKeyword().isEmpty()) {
+            Bson kw = Filters.or(
+                    Filters.regex("operator", q.getKeyword(), "i"),
+                    Filters.regex("target", q.getKeyword(), "i"),
+                    Filters.regex("detail", q.getKeyword(), "i")
+            );
+            filters.add(kw);
+        }
+        return filters.isEmpty() ? new Document() : Filters.and(filters);
+    }
+
+    private AuditRecord mapDocument(Document d) {
+        AuditRecord r = new AuditRecord();
+        Object id = d.get("_id");
+        if (id instanceof Number) {
+            r.setId(((Number) id).longValue());
+        }
+        r.setTimestamp(d.getLong("timestamp") == null ? 0 : d.getLong("timestamp"));
+        r.setOperator(d.getString("operator"));
+        Object role = d.get("operator_role");
+        if (role instanceof Number) {
+            r.setOperatorRole(((Number) role).intValue());
+        }
+        r.setType(d.getString("type"));
+        r.setTarget(d.getString("target"));
+        r.setIp(d.getString("ip"));
+        r.setResult(d.getString("result"));
+        r.setDetail(d.getString("detail"));
+        return r;
+    }
+
     @Override
     public void close() {
     }

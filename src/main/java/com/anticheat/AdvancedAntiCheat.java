@@ -9,6 +9,8 @@ import com.anticheat.managers.*;
 import com.anticheat.profiles.BehaviorTracker;
 import com.anticheat.profiles.PlayerProfile;
 import com.anticheat.utils.VersionUtil;
+import com.anticheat.web.WebServer;
+import com.anticheat.web.auth.AuthManager;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -31,28 +33,43 @@ public class AdvancedAntiCheat extends JavaPlugin {
     private com.anticheat.listeners.ProfileGUIListener profileGUIListener;
     private AdvancedDetectionManager advancedDetectionManager;
 
+    // Web 面板相关
+    private AuditManager auditManager;
+    private AuthManager authManager;
+    private WebServer webServer;
+
     @Override
     public void onEnable() {
         saveDefaultConfig();
-        
+
         String version = VersionUtil.getVersion();
         boolean isHighVersion = VersionUtil.isHighVersion();
-        
+
         getLogger().info("§6[AdvancedAntiCheat] 检测到服务器版本: " + version);
         getLogger().info("§6[AdvancedAntiCheat] 使用" + (isHighVersion ? "高版本" : "低版本") + "兼容模式");
-        
+
         initializeManagers();
         registerListeners();
         registerCommands();
-        
+
         startRiskDecayTask();
-        
+
+        // 启动 Web 面板（依赖 AuditManager、BanManager 已就绪）
+        startWebPanel();
+
         getLogger().info("§2[AdvancedAntiCheat] 插件已成功启用！");
         getLogger().info("§6[AdvancedAntiCheat] 保护您的服务器免受作弊侵害！");
     }
 
     @Override
     public void onDisable() {
+        // 先停 Web 面板，避免后续保存过程中触发脏推送
+        if (webServer != null) {
+            webServer.stop();
+        }
+        if (auditManager != null) {
+            // AuditManager 当前无 close 钩子，预留扩展位
+        }
         banManager.saveBans();
         reportManager.saveReports();
         checkClientManager.saveCheckData();
@@ -87,9 +104,39 @@ public class AdvancedAntiCheat extends JavaPlugin {
         captchaManager = new CaptchaManager(this);
         bountyManager = new BountyManager(this);
         profileManager = new ProfileManager(this);
-        
+
         advancedDetectionManager = new AdvancedDetectionManager(this);
         advancedDetectionManager.initialize(this);
+    }
+
+    /**
+     * 启动内嵌 Web 面板：先初始化 AuditManager → AuthManager → WebServer。
+     * WebServer.start() 内部在独立 daemon 线程启动 Javalin，不阻塞主线程。
+     */
+    private void startWebPanel() {
+        try {
+            auditManager = new AuditManager(this);
+            authManager = new AuthManager(this);
+            authManager.startCleaner();
+            webServer = new WebServer(this, authManager);
+            webServer.start();
+        } catch (Throwable t) {
+            getLogger().severe("[Web] Web 面板启动异常: " + t.getMessage());
+            t.printStackTrace();
+        }
+    }
+
+    @Override
+    public void reloadConfig() {
+        super.reloadConfig();
+        // AuthManager 配置热更
+        if (authManager != null) {
+            try {
+                authManager.reload();
+            } catch (Throwable t) {
+                getLogger().warning("[Web] 重新加载 AuthManager 配置失败: " + t.getMessage());
+            }
+        }
     }
 
     private void registerListeners() {
@@ -173,6 +220,18 @@ public class AdvancedAntiCheat extends JavaPlugin {
 
     public AdvancedDetectionManager getAdvancedDetectionManager() {
         return advancedDetectionManager;
+    }
+
+    public AuditManager getAuditManager() {
+        return auditManager;
+    }
+
+    public AuthManager getAuthManager() {
+        return authManager;
+    }
+
+    public WebServer getWebServer() {
+        return webServer;
     }
 
     private void startRiskDecayTask() {

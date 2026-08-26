@@ -1,6 +1,8 @@
 package com.anticheat.managers;
 
 import com.anticheat.AdvancedAntiCheat;
+import com.anticheat.managers.audit.AuditQuery;
+import com.anticheat.managers.audit.AuditRecord;
 import com.anticheat.profiles.PlayerProfile;
 import com.anticheat.repositories.DatabaseRepository;
 import com.anticheat.repositories.impl.MongoRepository;
@@ -164,12 +166,19 @@ public class DatabaseManager {
                             "last_updated BIGINT NOT NULL" +
                             ")");
                     stmt.execute("CREATE INDEX IF NOT EXISTS idx_profiles_player ON player_profiles(player_uuid)");
-                    
+
                     plugin.getLogger().info("SQL数据库表初始化完成！");
                 }
             } catch (SQLException e) {
                 throw new RuntimeException("创建数据库表失败: " + e.getMessage(), e);
             }
+        }
+        // 统一建审计表（SQL 走 DDL；Mongo/Redis noop）
+        try {
+            repository.ensureAuditTable();
+            plugin.getLogger().info("审计日志表初始化完成！");
+        } catch (Exception e) {
+            plugin.getLogger().warning("审计日志表初始化失败: " + e.getMessage());
         }
     }
     
@@ -261,7 +270,47 @@ public class DatabaseManager {
     public String getDatabaseType() {
         return databaseType;
     }
-    
+
+    public DatabaseRepository getRepository() {
+        return repository;
+    }
+
+    // ===== 审计日志 =====
+
+    /** 异步保存审计记录（fire-and-forget）。 */
+    public void saveAudit(AuditRecord audit) {
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                try {
+                    repository.saveAudit(audit);
+                } catch (Exception e) {
+                    plugin.getLogger().warning("保存审计记录失败: " + e.getMessage());
+                }
+            }
+        }.runTaskAsynchronously(plugin);
+    }
+
+    /** 同步查询审计记录（注意：在主线程调用会阻塞主线程，建议在 Web 线程调用）。 */
+    public List<AuditRecord> queryAudits(AuditQuery query) {
+        try {
+            return repository.queryAudits(query);
+        } catch (Exception e) {
+            plugin.getLogger().warning("查询审计记录失败: " + e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /** 同步统计审计记录总数。 */
+    public long countAudits(AuditQuery query) {
+        try {
+            return repository.countAudits(query);
+        } catch (Exception e) {
+            plugin.getLogger().warning("统计审计记录失败: " + e.getMessage());
+            return 0;
+        }
+    }
+
     public void close() {
         try {
             repository.close();
