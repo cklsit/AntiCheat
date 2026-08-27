@@ -44,17 +44,36 @@ public class CaptchaManager {
         startCaptcha(player, Initiator.AUTO_DETECTION);
     }
 
+    /**
+     * 启动验证码。具备前置互斥与启动失败兜底：
+     * <ul>
+     *   <li>已有 captcha session 不重复启动</li>
+     *   <li>玩家不在线不启动</li>
+     *   <li>玩家正在被 CheckClientManager 查端（人工）时不启动，避免两个"传送+限制+计时"状态机冲突（互相 cancel teleport / 互相 cancel 事件）</li>
+     * </ul>
+     */
     public void startCaptcha(Player player, Initiator initiator) {
+        if (player == null) return;
         UUID uuid = player.getUniqueId();
 
         if (activeSessions.containsKey(uuid)) {
             return;
         }
+        if (!player.isOnline()) {
+            return;
+        }
+        // 互斥：查端系统 (startCheck) 会 cancel teleport、冻结玩家。两个并行会导致"验证码 teleport 被取消→session遗留→超时踢人"
+        if (plugin.getCheckClientManager() != null && plugin.getCheckClientManager().isBeingChecked(uuid)) {
+            player.sendMessage("§c你正在进行人工查端，无法同时进行验证码验证。");
+            return;
+        }
+        // 若玩家已被封禁：由 PlayerJoinListener 踢人，不启动 captcha
+        if (plugin.getBanManager() != null && plugin.getBanManager().isBanned(uuid)) {
+            return;
+        }
 
         Location originalLocation = player.getLocation().clone();
-
         Location captchaLocation = captchaWorld.getNextLocation();
-
         List<CaptchaTask> tasks = generateTasks();
 
         CaptchaSession session = new CaptchaSession(
@@ -70,7 +89,13 @@ public class CaptchaManager {
 
         activeSessions.put(uuid, session);
 
-        session.start();
+        try {
+            session.start();
+        } catch (Throwable t) {
+            // 极端保护：start 抛异常时确保 activeSessions 不残留，避免下次无法启动 / 超时踢人
+            plugin.getLogger().warning("[CaptchaManager] 启动验证码失败，清理 session: " + t.getMessage());
+            activeSessions.remove(uuid);
+        }
     }
 
     private List<CaptchaTask> generateTasks() {
@@ -158,6 +183,7 @@ public class CaptchaManager {
 
         private final AdvancedAntiCheat plugin;
         private final Player player;
+        private final UUID playerUuid;
         private final Location originalLocation;
         private final Location captchaLocation;
         private final List<CaptchaTask> tasks;
@@ -169,6 +195,8 @@ public class CaptchaManager {
         private long startTime;
         private boolean completed;
         private boolean failed;
+        /** 被守卫机制/外部打断：不惩罚也不传送，只是安静清理。 */
+        private boolean cancelled;
         private BukkitRunnable timerTask;
         private BukkitRunnable warningTask;
         private CaptchaTask currentTask;
@@ -178,6 +206,7 @@ public class CaptchaManager {
                              Initiator initiator, Map<UUID, CaptchaSession> activeSessions) {
             this.plugin = plugin;
             this.player = player;
+            this.playerUuid = player.getUniqueId();
             this.originalLocation = originalLocation;
             this.captchaLocation = captchaLocation;
             this.tasks = tasks;
@@ -187,6 +216,7 @@ public class CaptchaManager {
             this.currentTaskIndex = 0;
             this.completed = false;
             this.failed = false;
+            this.cancelled = false;
             this.currentTask = null;
         }
 
@@ -195,10 +225,49 @@ public class CaptchaManager {
 
             player.teleport(captchaLocation);
 
-            player.sendMessage("§c§l[!] §f由于你的行为触犯了反作弊系统，正在进行验证");
+            // 启动消息按 initiator 区分：NEW_PLAYER 不提示"作弊行为"
+            if (initiator == Initiator.NEW_PLAYER) {
+                player.sendMessage("§e[!] §f新玩家验证：请在 " + timeLimit + " 秒内完成下方任务");
+            } else {
+                player.sendMessage("§c§l[!] §f由于你的行为触犯了反作弊系统，正在进行验证");
+            }
 
             startTimer();
             startCurrentTask();
+
+            // ============================================================
+            // Teleport 成功守卫（核心修复：修复"瞬间传回来 session 残留→超时踢人"）
+            //
+            // 背景：其它插件（Essentials、AuthMe、多世界默认 spawn 传送、查端 cancel teleport）
+            //       可能在 Join 阶段 / start() 同步调用后，把玩家从验证码世界抢回主世界。
+            //       session 的 timerTask 不知道这件事，会正常计时然后 fail() 踢人。
+            // 机制：2 tick 后检查玩家实际位置是否仍在验证码区域（同世界且距离 < 16 格）。
+            //       如果不在，安静 cancel（不 ban / 不 kick / 不再 teleport，只清状态）。
+            // ============================================================
+            final UUID capturedUuid = playerUuid;
+            final Location capturedCaptchaLoc = captchaLocation;
+            new BukkitRunnable() {
+                @Override
+                public void run() {
+                    // 已经自然结束的（complete/fail）不再介入
+                    if (completed || failed || cancelled) return;
+                    Player current = Bukkit.getPlayer(capturedUuid);
+                    if (current == null || !current.isOnline()) {
+                        // 玩家已下线：onPlayerQuit 会处理 fail，这里不重复
+                        return;
+                    }
+                    Location now = current.getLocation();
+                    boolean sameWorld = now.getWorld() != null
+                            && capturedCaptchaLoc.getWorld() != null
+                            && now.getWorld().getName().equals(capturedCaptchaLoc.getWorld().getName());
+                    boolean nearCaptchaLocation = sameWorld && now.distance(capturedCaptchaLoc) < 16.0;
+                    if (!nearCaptchaLocation) {
+                        plugin.getLogger().info("[Captcha] 玩家 " + current.getName()
+                                + " 被外部插件从验证码区域传送回主世界，安静取消验证码 (initiator=" + initiator + ")");
+                        abortSilent();
+                    }
+                }
+            }.runTaskLater(plugin, 2L);
         }
 
         private void startTimer() {
@@ -210,7 +279,7 @@ public class CaptchaManager {
             timerTask = new BukkitRunnable() {
                 @Override
                 public void run() {
-                    if (completed || failed) {
+                    if (completed || failed || cancelled) {
                         this.cancel();
                         return;
                     }
@@ -223,9 +292,14 @@ public class CaptchaManager {
                         return;
                     }
 
-                    float progress = (float) remaining / timeLimitFinal;
-                    player.setExp(progress);
-                    player.setLevel((int) remaining);
+                    // 玩家如果此刻不在线，保留任务等 onPlayerQuit fail，这里不额外处理以免干扰
+                    try {
+                        float progress = (float) remaining / timeLimitFinal;
+                        player.setExp(progress);
+                        player.setLevel((int) remaining);
+                    } catch (Throwable ignored) {
+                        // 玩家可能瞬间下线，ignore
+                    }
 
                     if (remaining == 10) {
                         startWarning();
@@ -240,11 +314,14 @@ public class CaptchaManager {
             warningTask = new BukkitRunnable() {
                 @Override
                 public void run() {
-                    if (completed || failed) {
+                    if (completed || failed || cancelled) {
                         this.cancel();
                         return;
                     }
-                    player.playSound(player.getLocation(), org.bukkit.Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f, 0.5f);
+                    try {
+                        player.playSound(player.getLocation(), org.bukkit.Sound.BLOCK_NOTE_BLOCK_BASS, 1.0f, 0.5f);
+                    } catch (Throwable ignored) {
+                    }
                 }
             };
 
@@ -263,10 +340,13 @@ public class CaptchaManager {
         }
 
         public void completeCurrentTask() {
-            if (completed || failed) return;
+            if (completed || failed || cancelled) return;
 
             if (currentTask != null) {
-                currentTask.cleanup(player);
+                try {
+                    currentTask.cleanup(player);
+                } catch (Throwable ignored) {
+                }
             }
 
             currentTaskIndex++;
@@ -278,55 +358,103 @@ public class CaptchaManager {
             }
         }
 
-        private void complete() {
-            completed = true;
-
-            if (timerTask != null) timerTask.cancel();
-            if (warningTask != null) warningTask.cancel();
+        /**
+         * 清理 Session 资源（timer / warning / tasks / world / exp / activeSessions）。
+         * 由 complete() / fail() / abortSilent() 共用，避免三处重复代码导致 "恢复不完整，状态残留"。
+         *
+         * @param teleportBack 是否把玩家传 originalLocation（complete 成功时 true；abort 被外部传回主世界 false；fail 惩罚分支 false）
+         */
+        private void cleanup(boolean teleportBack) {
+            if (timerTask != null) try { timerTask.cancel(); } catch (Throwable ignored) { timerTask = null; }
+            if (warningTask != null) try { warningTask.cancel(); } catch (Throwable ignored) { warningTask = null; }
 
             cleanupTasks();
-            plugin.getCaptchaManager().getCaptchaWorld().cleanup(captchaLocation);
+            try {
+                plugin.getCaptchaManager().getCaptchaWorld().cleanup(captchaLocation);
+            } catch (Throwable ignored) {
+            }
 
-            player.teleport(originalLocation);
-            player.sendMessage("§a§l[!] §f验证完毕");
-            player.setExp(0);
-            player.setLevel(0);
+            // 恢复玩家状态（EXP / Level / WalkSpeed），只针对在线玩家，避免 NPE
+            Player current = Bukkit.getPlayer(playerUuid);
+            if (current != null && current.isOnline()) {
+                try {
+                    current.setExp(0);
+                    current.setLevel(0);
+                    current.setWalkSpeed(0.2f);
+                    current.setFlySpeed(0.2f);
+                } catch (Throwable ignored) {
+                }
+                if (teleportBack) {
+                    try {
+                        if (!current.isDead()) {
+                            current.teleport(originalLocation);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
 
-            activeSessions.remove(player.getUniqueId());
+            activeSessions.remove(playerUuid);
+
+            // 全部 session 结束重置世界（保持与 CaptchaManager.removeSession 一致的世界回收）
+            if (activeSessions.isEmpty()) {
+                try {
+                    plugin.getCaptchaManager().getCaptchaWorld().resetWorld();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+
+        private void complete() {
+            if (completed || failed || cancelled) return;
+            completed = true;
+            cleanup(true);
+            Player current = Bukkit.getPlayer(playerUuid);
+            if (current != null && current.isOnline()) {
+                current.sendMessage("§a§l[!] §f验证完毕");
+            }
         }
 
         public void fail() {
+            if (completed || failed || cancelled) return;
             failed = true;
-
-            if (timerTask != null) timerTask.cancel();
-            if (warningTask != null) warningTask.cancel();
-
-            cleanupTasks();
-            plugin.getCaptchaManager().getCaptchaWorld().cleanup(captchaLocation);
-
-            player.setExp(0);
-            player.setLevel(0);
-
-            activeSessions.remove(player.getUniqueId());
+            // fail 分支惩罚在 cleanup 之后执行：确保状态清完再 ban/kick，避免被 teleport 到验证码残留世界
+            cleanup(false);
+            Player current = Bukkit.getPlayer(playerUuid);
+            if (current == null || !current.isOnline()) return;
 
             if (initiator != Initiator.NEW_PLAYER) {
                 plugin.getBanManager().banPlayer(
-                        player.getUniqueId(),
-                        player.getName(),
+                        current.getUniqueId(),
+                        current.getName(),
                         "1d",
                         "验证码验证失败"
                 );
             } else {
-                player.kickPlayer("§c验证码验证失败，请重新加入服务器");
+                current.kickPlayer("§c验证码验证失败，请重新加入服务器");
             }
         }
 
+        /**
+         * 被外部打断（其它插件 teleport、玩家在 Join 阶段被 spawn 传送抢回主世界、守卫检测到不在验证码区）。
+         * 不惩罚、不 kick，仅安静清理，避免误踢。
+         */
+        private void abortSilent() {
+            if (completed || failed || cancelled) return;
+            cancelled = true;
+            // 玩家已经被传出去了，不要再 teleportBack
+            cleanup(false);
+        }
+
         private void cleanupTasks() {
+            Player current = Bukkit.getPlayer(playerUuid);
+            boolean online = current != null && current.isOnline();
             for (CaptchaTask task : tasks) {
                 try {
-                    task.cleanup(player);
-                } catch (Exception e) {
-                    plugin.getLogger().severe("清理验证码任务失败: " + e.getMessage());
+                    if (online) {
+                        task.cleanup(current);
+                    }
+                } catch (Throwable ignored) {
                 }
             }
         }
