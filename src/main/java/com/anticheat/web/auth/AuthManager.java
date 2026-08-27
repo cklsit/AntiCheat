@@ -52,10 +52,18 @@ public class AuthManager {
         ttlMillis = Math.max(1, cm.getWebSessionTimeoutMinutes()) * 60_000L;
 
         accounts.clear();
+        // v2.1.0 及更早版本的 config.yml 默认 password-hash 是无效占位串（无法通过任何明文校验），
+        // 这里识别它并给出显式修复指引，避免用户反复试错被前端节流锁定
+        final String KNOWN_BAD_PLACEHOLDER_HASH = "$2a$10$N9qo8uLOickgx2ZMRZoMy4IjkyYbN7UuLpJ3y3oXZ7p1C4Ra0Km8O";
         for (Map<String, Object> entry : cm.getWebAccounts()) {
             Account acc = new Account();
             acc.username = String.valueOf(entry.getOrDefault("username", ""));
             acc.passwordHash = String.valueOf(entry.getOrDefault("password-hash", ""));
+            if (KNOWN_BAD_PLACEHOLDER_HASH.equals(acc.passwordHash)) {
+                plugin.getLogger().warning("[Web] 账号 " + acc.username + " 的 password-hash 是无效的默认占位值，"
+                        + "任何密码都无法登录！请在游戏内执行 /ac genpwd <新密码> 生成真实哈希后"
+                        + "替换 plugins/AdvancedAntiCheat/config.yml 中 web.auth.accounts[].password-hash，再执行 /ac reload");
+            }
             acc.role = String.valueOf(entry.getOrDefault("role", "observer"));
             Object perms = entry.get("permissions");
             if (perms instanceof List<?> list) {
