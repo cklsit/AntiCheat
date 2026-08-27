@@ -19,6 +19,8 @@ public class BountyManager {
     private final Map<UUID, BountySession> activeSessions;
     private final Map<UUID, Long> dailyTimeUsed;
     private final Map<String, Integer> leaderboard;
+    /** 玩家在赏金世界死亡时：BountySession.end() 内 teleport 对死亡实体无效，需要在 PlayerRespawnEvent 补传送。 */
+    private final Map<UUID, org.bukkit.Location> pendingRespawnBackup;
     private long defaultTimeLimitMinutes;
     private boolean enabled;
 
@@ -28,7 +30,20 @@ public class BountyManager {
         this.activeSessions = new ConcurrentHashMap<>();
         this.dailyTimeUsed = new ConcurrentHashMap<>();
         this.leaderboard = new LinkedHashMap<>();
+        this.pendingRespawnBackup = new ConcurrentHashMap<>();
         loadConfig();
+    }
+
+    /** 供 BountySession.end() 在玩家死亡时暂存进入赏金前的原位置（下一次 respawn 后要传送回）。 */
+    public void putPendingRespawnBackup(UUID uuid, org.bukkit.Location originalLocation) {
+        if (uuid == null || originalLocation == null) return;
+        pendingRespawnBackup.put(uuid, originalLocation);
+    }
+
+    /** 供 BountyListener 的 PlayerRespawnEvent 读取并立即移除。没有则返回 null。 */
+    public org.bukkit.Location pollPendingRespawnBackup(UUID uuid) {
+        if (uuid == null) return null;
+        return pendingRespawnBackup.remove(uuid);
     }
 
     private void loadConfig() {

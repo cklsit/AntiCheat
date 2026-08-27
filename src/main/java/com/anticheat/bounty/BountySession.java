@@ -1,10 +1,13 @@
 package com.anticheat.bounty;
 
 import com.anticheat.AdvancedAntiCheat;
+import com.anticheat.utils.VersionUtil;
 import org.bukkit.Bukkit;
+import org.bukkit.DyeColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Zombie;
@@ -21,6 +24,7 @@ public class BountySession {
     private final Player player;
     private final UUID uuid;
     private final Location originalLocation;
+    private final Location originalBedSpawnLocation; // 进入赏金前的重生点（可能为 null = 默认世界）
     private final long startTime;
     private long timeLimitMinutes;
     private long timeSpentSeconds;
@@ -40,6 +44,14 @@ public class BountySession {
         this.player = player;
         this.uuid = player.getUniqueId();
         this.originalLocation = player.getLocation().clone();
+        // 保存原重生点（允许为 null 表示玩家没有设置床重生点，使用默认）
+        Location bed;
+        try {
+            bed = player.getBedSpawnLocation();
+        } catch (Throwable t) {
+            bed = null;
+        }
+        this.originalBedSpawnLocation = bed;
         this.startTime = Instant.now().getEpochSecond();
         this.timeLimitMinutes = timeLimitMinutes;
         this.timeSpentSeconds = 0;
@@ -55,7 +67,19 @@ public class BountySession {
 
     public void start() {
         plugin.getBountyManager().getBountyWorld().preparePlayer(player);
-        player.teleport(plugin.getBountyManager().getBountyWorld().getSpawnLocation());
+        // 先设置赏金世界为重生点（确保玩家在赏金世界死亡/断开后复活不会回到主世界床）
+        Location bountySpawn = plugin.getBountyManager().getBountyWorld().getSpawnLocation();
+        try {
+            player.setBedSpawnLocation(bountySpawn, true);
+        } catch (Throwable t) {
+            plugin.getLogger().warning("[BountySession] 设置赏金重生点失败（1.8 兼容处理）: " + t.getMessage());
+            try {
+                // 1.8 单参数版本（无 force）
+                player.setBedSpawnLocation(bountySpawn);
+            } catch (Throwable ignored) {
+            }
+        }
+        player.teleport(bountySpawn);
 
         player.sendMessage("§e================================================");
         player.sendMessage("§c§l欢迎来到漏洞赏金沙箱");
@@ -136,8 +160,11 @@ public class BountySession {
         pointALocation = new Location(world, -30, PLATFORM_HEIGHT, -30);
         pointBLocation = new Location(world, 30, PLATFORM_HEIGHT, 30);
         
-        createPointMarker(pointALocation, Material.RED_WOOL, "A");
-        createPointMarker(pointBLocation, Material.GREEN_WOOL, "B");
+        // 1.8 无彩色羊毛枚举：RED_WOOL/GREEN_WOOL → 使用 WOOL + DyeColor 数据值
+        Material matA = VersionUtil.compatColoredWoolMaterial("RED_WOOL", DyeColor.RED);
+        Material matB = VersionUtil.compatColoredWoolMaterial("GREEN_WOOL", DyeColor.GREEN);
+        createPointMarker(pointALocation, matA, "A", DyeColor.RED);
+        createPointMarker(pointBLocation, matB, "B", DyeColor.GREEN);
         
         player.sendMessage("§a起点 A (-30, " + PLATFORM_HEIGHT + ", -30) 已标记为红色羊毛");
         player.sendMessage("§a终点 B (30, " + PLATFORM_HEIGHT + ", 30) 已标记为绿色羊毛");
@@ -178,16 +205,23 @@ public class BountySession {
     }
     
     private void setupInventoryChallengeTask() {
-        player.getInventory().addItem(new ItemStack(Material.TOTEM_OF_UNDYING));
-        player.sendMessage("§a已给予不死图腾");
-        player.sendMessage("§e快速将图腾放到副手栏");
+        // 1.8 无不死图腾：回退为金苹果（仍能考验背包操作速度）
+        Material totemCompat = VersionUtil.compatTotemOrFallback();
+        player.getInventory().addItem(new ItemStack(totemCompat));
+        if (totemCompat == Material.GOLDEN_APPLE) {
+            player.sendMessage("§a已给予金苹果（1.8 替代图腾）");
+        } else {
+            player.sendMessage("§a已给予不死图腾");
+        }
+        player.sendMessage("§e快速将物品放到副手栏（1.8 无副手栏时直接放入快捷栏并选中）");
     }
     
     private void setupFreeTestTask() {
         player.getInventory().addItem(new ItemStack(Material.DIAMOND_SWORD));
         player.getInventory().addItem(new ItemStack(Material.BOW));
         player.getInventory().addItem(new ItemStack(Material.ARROW, 64));
-        player.getInventory().addItem(new ItemStack(Material.TOTEM_OF_UNDYING));
+        // 1.8 无不死图腾 → 回退为金苹果
+        player.getInventory().addItem(new ItemStack(VersionUtil.compatTotemOrFallback()));
         player.getInventory().addItem(new ItemStack(Material.GOLDEN_APPLE, 5));
         player.getInventory().addItem(new ItemStack(Material.POTION, 1, (short) 8226));
         
@@ -201,19 +235,24 @@ public class BountySession {
             world.spawnEntity(spawnLoc, EntityType.ZOMBIE);
         }
         
-        player.sendMessage("§a已给予测试道具：钻石剑、弓、箭矢、图腾、金苹果、跳跃药水");
+        player.sendMessage("§a已给予测试道具：钻石剑、弓、箭矢、金苹果（或图腾）、金苹果、跳跃药水");
         player.sendMessage("§a已生成测试怪物");
         player.sendMessage("§e自由测试任何作弊功能");
     }
     
-    private void createPointMarker(Location location, Material material, String label) {
+    private void createPointMarker(Location location, Material material, String label, DyeColor dye) {
         World world = location.getWorld();
         for (int x = -1; x <= 1; x++) {
             for (int z = -1; z <= 1; z++) {
-                world.getBlockAt(location.getBlockX() + x, location.getBlockY() - 1, location.getBlockZ() + z).setType(material);
+                Block block = world.getBlockAt(location.getBlockX() + x, location.getBlockY() - 1, location.getBlockZ() + z);
+                block.setType(material);
+                // 1.8 WOOL 方块需 setData(DyeColor.getData()) 才有颜色；高版本 RED_WOOL 已是彩色，无需此行
+                if (dye != null) {
+                    VersionUtil.applyDyeColorIfLegacyWool(block, material, dye);
+                }
             }
         }
-        
+
         player.sendMessage("§6[" + label + "] 位置: (" + location.getBlockX() + ", " + location.getBlockY() + ", " + location.getBlockZ() + ")");
     }
     
@@ -317,9 +356,47 @@ public class BountySession {
         
         endTask();
 
+        // 恢复玩家原重生点（先恢复，再 teleport/重置状态，避免服务器默认 spawn 逻辑覆盖）
+        try {
+            if (originalBedSpawnLocation != null) {
+                try {
+                    player.setBedSpawnLocation(originalBedSpawnLocation, true);
+                } catch (Throwable t) {
+                    try { player.setBedSpawnLocation(originalBedSpawnLocation); } catch (Throwable ignored) { }
+                }
+            } else {
+                // 玩家原先生就是默认重生 → 清除 bed spawn：1.9+ setBedSpawnLocation(null)；1.8 需要反射或 NMS
+                try {
+                    player.setBedSpawnLocation(null, true);
+                } catch (Throwable t) {
+                    try { player.setBedSpawnLocation(null); } catch (Throwable ignored) {
+                        // 1.8 无法直接清成 null，设置为原世界默认 spawn 作为兜底
+                        Location defSpawn = Bukkit.getWorlds().get(0).getSpawnLocation();
+                        try { player.setBedSpawnLocation(defSpawn); } catch (Throwable ignored2) { }
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            plugin.getLogger().warning("[BountySession] 恢复玩家原重生点失败: " + t.getMessage());
+        }
+
+        // 传送回进入前的位置（resetPlayerState 内部会清理效果/装备等，但需要再 teleport）
         plugin.getBountyManager().getBountyWorld().resetPlayerState(player);
 
-        log("[SESSION] Session ended for player " + player.getName());
+        // 玩家死亡时 teleport 会被服务器取消 → 暂存位置让 BountyListener.PlayerRespawnEvent 下一次复活时补传送
+        boolean playerIsDead = false;
+        try {
+            playerIsDead = player.isDead() || player.getHealth() <= 0;
+        } catch (Throwable ignored) {
+        }
+        if (playerIsDead) {
+            plugin.getBountyManager().putPendingRespawnBackup(uuid, originalLocation);
+            player.sendMessage("§c你在漏洞赏金沙箱中死亡，已自动退出沙箱。复活后将返回原位置。");
+        } else {
+            player.teleport(originalLocation);
+        }
+
+        log("[SESSION] Session ended for player " + player.getName() + " (dead=" + playerIsDead + ")");
     }
 
     public void log(String message) {
