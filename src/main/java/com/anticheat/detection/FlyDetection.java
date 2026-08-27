@@ -98,7 +98,7 @@ public class FlyDetection extends Detection {
 
         Location feetLoc = player.getLocation().subtract(0, 0.1, 0);
         Block block = feetLoc.getBlock();
-        return block.getType().isSolid() && !block.isPassable();
+        return block.getType().isSolid() && !VersionUtil.safeIsPassable(block);
     }
 
     private boolean isNormalJump(Player player, Vector velocity) {

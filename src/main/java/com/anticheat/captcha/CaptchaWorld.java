@@ -1,6 +1,7 @@
 package com.anticheat.captcha;
 
 import com.anticheat.AdvancedAntiCheat;
+import com.anticheat.utils.VersionUtil;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -48,11 +49,11 @@ public class CaptchaWorld {
         captchaWorld = Bukkit.createWorld(creator);
 
         if (captchaWorld != null) {
-            captchaWorld.setGameRuleValue("doMobSpawning", "false");
-            captchaWorld.setGameRuleValue("doDaylightCycle", "false");
-            captchaWorld.setGameRuleValue("doWeatherCycle", "false");
-            captchaWorld.setGameRuleValue("doNaturalRegeneration", "false");
-            captchaWorld.setGameRuleValue("keepInventory", "false");
+            VersionUtil.setGameRuleSafe(captchaWorld, "doMobSpawning", "false");
+            VersionUtil.setGameRuleSafe(captchaWorld, "doDaylightCycle", "false");
+            VersionUtil.setGameRuleSafe(captchaWorld, "doWeatherCycle", "false");
+            VersionUtil.setGameRuleSafe(captchaWorld, "doNaturalRegeneration", "false");
+            VersionUtil.setGameRuleSafe(captchaWorld, "keepInventory", "false");
             captchaWorld.setTime(1000);
             captchaWorld.setWeatherDuration(0);
             captchaWorld.setStorm(false);
@@ -94,13 +95,14 @@ public class CaptchaWorld {
             }
         }
 
+        final Material barrierCompat = VersionUtil.compatBarrier();
         for (int dx = 0; dx <= PLATFORM_SIZE + 1; dx++) {
             for (int dz = 0; dz <= PLATFORM_SIZE + 1; dz++) {
                 if (dx == 0 || dx == PLATFORM_SIZE + 1 || dz == 0 || dz == PLATFORM_SIZE + 1) {
                     for (int dy = 1; dy <= 5; dy++) {
                         Block block = captchaWorld.getBlockAt(x + dx - 1, y + dy, z + dz - 1);
-                        if (block.getType() != Material.BARRIER) {
-                            block.setType(Material.BARRIER);
+                        if (block.getType() != barrierCompat) {
+                            block.setType(barrierCompat);
                         }
                     }
                 }
@@ -122,12 +124,13 @@ public class CaptchaWorld {
             }
         }
 
+        final Material barrierCompat = VersionUtil.compatBarrier();
         for (int dx = 0; dx <= PLATFORM_SIZE + 1; dx++) {
             for (int dz = 0; dz <= PLATFORM_SIZE + 1; dz++) {
                 if (dx == 0 || dx == PLATFORM_SIZE + 1 || dz == 0 || dz == PLATFORM_SIZE + 1) {
                     for (int dy = 1; dy <= 5; dy++) {
                         Block block = captchaWorld.getBlockAt(x + dx - 1, y + dy, z + dz - 1);
-                        if (block.getType() == Material.BARRIER) {
+                        if (block.getType() == barrierCompat) {
                             block.setType(Material.AIR);
                         }
                     }

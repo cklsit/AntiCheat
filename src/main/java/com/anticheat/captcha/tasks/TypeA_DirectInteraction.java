@@ -1,8 +1,10 @@
 package com.anticheat.captcha.tasks;
 
 import com.anticheat.AdvancedAntiCheat;
+import com.anticheat.utils.VersionUtil;
 import org.bukkit.DyeColor;
 import org.bukkit.Location;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Sheep;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
@@ -47,8 +49,8 @@ public class TypeA_DirectInteraction extends CaptchaTask {
                 } while (otherColor == targetColor);
                 sheep.setColor(otherColor);
             }
-            sheep.setInvulnerable(true);
-            sheep.setSilent(true);
+            VersionUtil.callSetInvulnerable(sheep, true);
+            try { sheep.setSilent(true); } catch (Throwable ignored) { /* 1.8 无 setSilent 则跳过 */ }
             sheepList.add(sheep);
         }
 
@@ -86,7 +88,7 @@ public class TypeA_DirectInteraction extends CaptchaTask {
             return false;
         }
 
-        org.bukkit.entity.Entity target = player.getTargetEntity(5);
+        Entity target = VersionUtil.safeGetTargetEntity(player, 5);
 
         if (target instanceof Sheep) {
             Sheep sheep = (Sheep) target;

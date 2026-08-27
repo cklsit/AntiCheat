@@ -3,6 +3,7 @@ package com.anticheat.gui;
 import com.anticheat.AdvancedAntiCheat;
 import com.anticheat.listeners.ProfileGUIListener;
 import com.anticheat.profiles.PlayerProfile;
+import com.anticheat.utils.VersionUtil;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
@@ -56,7 +57,7 @@ public class ProfileGUI {
         ItemStack banPermItem = createActionItem(Material.REDSTONE_BLOCK, ChatColor.DARK_RED + "Perma-Ban", "Ban permanently");
         inv.setItem(50, banPermItem);
 
-        ItemStack resetItem = createActionItem(Material.BARRIER, ChatColor.YELLOW + "Reset Baseline", "Clear behavior history");
+        ItemStack resetItem = createActionItem(VersionUtil.compatBarrier(), ChatColor.YELLOW + "Reset Baseline", "Clear behavior history");
         inv.setItem(51, resetItem);
     }
 

@@ -2,6 +2,7 @@ package com.anticheat.detection.movement;
 
 import com.anticheat.detection.physics.EntitySnapshot;
 import com.anticheat.detection.physics.PhysicsConstants;
+import com.anticheat.utils.VersionUtil;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -196,7 +197,7 @@ public class ImpossibleActionDetector {
             return null;
         }
         
-        if (player.isSprinting() || player.isSwimming() || player.isInWater()) {
+        if (player.isSprinting() || com.anticheat.utils.VersionUtil.safeIsSwimming(player) || com.anticheat.utils.VersionUtil.isInWater(player)) {
             walkData.waterWalkTicks = 0;
             return null;
         }
@@ -378,7 +379,7 @@ public class ImpossibleActionDetector {
             return true;
         }
         
-        if (hasPotionEffect(player, "SLOW_FALLING")) {
+        if (VersionUtil.hasPotionEffectByName(player, "SLOW_FALLING")) {
             return true;
         }
         
@@ -400,15 +401,15 @@ public class ImpossibleActionDetector {
         Location feetLoc = player.getLocation();
         Block belowBlock = feetLoc.subtract(0, 1, 0).getBlock();
         
-        if (isFallDamageReductionBlock(belowBlock.getType())) {
+        if (VersionUtil.isFallDamageReductionBlockCompat(belowBlock.getType())) {
             return true;
         }
         
-        if (hasPotionEffect(player, "SLOW_FALLING")) {
+        if (VersionUtil.hasPotionEffectByName(player, "SLOW_FALLING")) {
             return true;
         }
         
-        if (player.isGliding()) {
+        if (VersionUtil.safeIsGliding(player)) {
             return true;
         }
         
@@ -477,20 +478,18 @@ public class ImpossibleActionDetector {
     }
 
     /**
-     * 检查是否是减少摔落伤害的方块
+     * 检查是否是减少摔落伤害的方块（已迁移到 VersionUtil 反射版保证 1.8 兼容）。
+     * 保留此方法仅以防有其他调用方。
      */
     private boolean isFallDamageReductionBlock(Material material) {
-        return material == Material.WATER ||
-               material == Material.SUGAR_CANE ||
-               material == Material.COBWEB ||
-               material == Material.HAY_BLOCK;
+        return VersionUtil.isFallDamageReductionBlockCompat(material);
     }
 
     /**
-     * 检查是否是水方块
+     * 检查是否是水方块（含 1.8 STATIONARY_WATER）。
      */
     private boolean isWater(Material material) {
-        return material == Material.WATER;
+        return VersionUtil.isInWaterStatic(material);
     }
 
     /**
@@ -514,7 +513,7 @@ public class ImpossibleActionDetector {
             Location checkLoc = new Location(from.getWorld(), x, y, z);
             Block block = checkLoc.getBlock();
             
-            if (block.getType().isSolid() && !block.isPassable()) {
+            if (block.getType().isSolid() && !VersionUtil.safeIsPassable(block)) {
                 count++;
             }
         }
