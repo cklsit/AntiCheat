@@ -60,49 +60,66 @@ public class AntiCheatCommand implements CommandExecutor {
 
     private void showHelp(CommandSender sender) {
         sender.sendMessage("");
-        sender.sendMessage("§c┌─────────────────────────────────────┐");
-        sender.sendMessage("§c│          §6AdvancedAntiCheat          §c│");
-        sender.sendMessage("§c└─────────────────────────────────────┘");
+        sender.sendMessage("§8╔══════════════════════════════════════════════════╗");
+        sender.sendMessage("§8║          §6§lAdvancedAntiCheat §7v2.1.0          §8║");
+        sender.sendMessage("§8║           §7指令帮助 · Commands Help            §8║");
+        sender.sendMessage("§8╚══════════════════════════════════════════════════╝");
         sender.sendMessage("");
-        sender.sendMessage(" §a/ac reload          §7- 重新加载配置文件");
-        sender.sendMessage(" §a/ac stats           §7- 查看检测统计信息");
-        sender.sendMessage(" §a/ac reports         §7- 查看待处理举报列表");
-        sender.sendMessage(" §a/ac profile <玩家>  §7- 查看玩家档案");
-        sender.sendMessage(" §a/ac genpwd <密码>   §7- 生成 Web 面板 bcrypt 哈希");
-        sender.sendMessage(" §a/ac help            §7- 显示此帮助信息");
+
+        sender.sendMessage(" §6§l[反作弊管理] §8(/ac)");
+        sender.sendMessage(" §a" + pad("/ac reload", 34) + "§8» §7重新加载配置文件");
+        sender.sendMessage(" §a" + pad("/ac stats", 34) + "§8» §7查看检测统计信息");
+        sender.sendMessage(" §a" + pad("/ac reports", 34) + "§8» §7查看待处理举报列表");
+        sender.sendMessage(" §a" + pad("/ac profile <玩家>", 34) + "§8» §7查看玩家行为档案");
+        sender.sendMessage(" §a" + pad("/ac genpwd <密码>", 34) + "§8» §7生成 Web 面板密码哈希");
+        sender.sendMessage(" §a" + pad("/ac help", 34) + "§8» §7显示此帮助信息");
         sender.sendMessage("");
-        sender.sendMessage(" §6玩家命令:");
-        sender.sendMessage("   §a/report <玩家> <原因>");
-        sender.sendMessage("   §7   举报作弊玩家");
+
+        sender.sendMessage(" §6§l[玩家命令]");
+        sender.sendMessage(" §a" + pad("/report <玩家> <原因>", 34) + "§8» §7举报作弊玩家");
         sender.sendMessage("");
-        sender.sendMessage(" §6管理员命令:");
-        sender.sendMessage("   §a/goto <玩家>");
-        sender.sendMessage("   §7   传送至指定玩家");
-        sender.sendMessage("   §a/ban <玩家> [时间] [原因]");
-        sender.sendMessage("   §7   封禁玩家");
-        sender.sendMessage("   §a/unban <玩家>");
-        sender.sendMessage("   §7   解封玩家");
-        sender.sendMessage("   §a/checkclient <玩家> <QQ号>");
-        sender.sendMessage("   §7   对玩家发起客户端检查");
-        sender.sendMessage("   §a/checkdone <玩家>");
-        sender.sendMessage("   §7   完成玩家的客户端检查");
-        sender.sendMessage("   §a/captcha <玩家|toggle|timelimit>");
-        sender.sendMessage("   §7   验证码测试命令");
+
+        sender.sendMessage(" §6§l[管理员命令]");
+        sender.sendMessage(" §a" + pad("/goto <玩家>", 34) + "§8» §7传送至玩家（支持跨服）");
+        sender.sendMessage(" §a" + pad("/ban <玩家> [时间] [原因]", 34) + "§8» §7封禁玩家（默认永久）");
+        sender.sendMessage(" §a" + pad("/unban <玩家>", 34) + "§8» §7解封玩家");
+        sender.sendMessage(" §a" + pad("/checkclient <玩家> <QQ号>", 34) + "§8» §7对玩家发起客户端检查");
+        sender.sendMessage(" §a" + pad("/checkdone <玩家>", 34) + "§8» §7结束玩家的客户端检查");
+        sender.sendMessage(" §a" + pad("/captcha <玩家|toggle|timelimit>", 34) + "§8» §7验证码测试命令");
         sender.sendMessage("");
-        sender.sendMessage(" §6漏洞赏金命令:");
-        sender.sendMessage("   §a/bounty enter");
-        sender.sendMessage("   §7   进入漏洞赏金沙箱");
-        sender.sendMessage("   §a/bounty leave");
-        sender.sendMessage("   §7   离开漏洞赏金沙箱");
-        sender.sendMessage("   §a/bounty start <任务>");
-        sender.sendMessage("   §7   开始赏金任务");
-        sender.sendMessage("   §a/bounty report <描述>");
-        sender.sendMessage("   §7   报告发现的漏洞");
-        sender.sendMessage("   §a/bounty lb");
-        sender.sendMessage("   §7   查看赏金排行榜");
+
+        sender.sendMessage(" §6§l[漏洞赏金] §8(/bounty)");
+        sender.sendMessage(" §a" + pad("/bounty enter", 34) + "§8» §7进入漏洞赏金沙箱");
+        sender.sendMessage(" §a" + pad("/bounty leave", 34) + "§8» §7离开漏洞赏金沙箱");
+        sender.sendMessage(" §a" + pad("/bounty invite <玩家>", 34) + "§8» §7邀请玩家加入沙箱");
+        sender.sendMessage(" §a" + pad("/bounty start <任务>", 34) + "§8» §7开始赏金任务");
+        sender.sendMessage(" §a" + pad("/bounty report <描述>", 34) + "§8» §7报告发现的漏洞");
+        sender.sendMessage(" §a" + pad("/bounty lb", 34) + "§8» §7查看赏金排行榜");
+        sender.sendMessage(" §a" + pad("/bounty complete", 34) + "§8» §7完成当前赏金任务");
         sender.sendMessage("");
-        sender.sendMessage("§c└─────────────────────────────────────┘");
+
+        sender.sendMessage("§8════════════════════════════════════════════════════");
+        sender.sendMessage(" §7参数说明: §8<> §7必填  §8[] §7可选  §8| §7多选");
+        sender.sendMessage("§8════════════════════════════════════════════════════");
         sender.sendMessage("");
+    }
+
+    /**
+     * 按显示宽度填充空格（中文字符按 2 宽度计算），用于命令对齐排版。
+     */
+    private String pad(String text, int width) {
+        int displayWidth = 0;
+        for (int i = 0; i < text.length(); i++) {
+            displayWidth += (text.charAt(i) > 127) ? 2 : 1;
+        }
+        if (displayWidth >= width) {
+            return text;
+        }
+        StringBuilder sb = new StringBuilder(text);
+        for (int i = displayWidth; i < width; i++) {
+            sb.append(' ');
+        }
+        return sb.toString();
     }
 
     private void showStats(CommandSender sender) {
