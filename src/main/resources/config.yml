@@ -1,24 +1,57 @@
+# 通知节流：同类反作弊提示对同一玩家的最小重复发送间隔（毫秒）
+# 用于防止聊天栏刷屏；不影响实际处罚动作（封禁/验证码/监控仍会立即执行）
+notify:
+  throttleMs: 2000
+
 detection:
+  # 各检测项通用字段：
+  #   enabled                是否启用该检测
+  #   maxViolations          触发封禁前允许的最大违规数
+  #   banTime                封禁时长（"30m"/"1h"/"6h"/"1d"/"7d"/"permanent"）
+  #   kickThreshold          达到该违规数时踢出玩家
+  #   humanReviewThreshold   达到该违规数时升级人工审核
+  #   warningCooldownSecs    警告消息冷却（秒），避免同类刷屏
+  #   notifyCooldownMs       检测通知冷却（毫秒），控制 DecisionActionCenter 提示频率
   fly:
     enabled: true
     maxViolations: 5
     banTime: "1h"
+    kickThreshold: 20
+    humanReviewThreshold: 15
+    warningCooldownSecs: 2
+    notifyCooldownMs: 5000
   speed:
     enabled: true
     maxViolations: 5
     banTime: "30m"
+    kickThreshold: 20
+    humanReviewThreshold: 15
+    warningCooldownSecs: 2
+    notifyCooldownMs: 5000
   esp:
     enabled: true
     maxViolations: 3
     banTime: "6h"
+    kickThreshold: 15
+    humanReviewThreshold: 10
+    warningCooldownSecs: 2
+    notifyCooldownMs: 5000
   killaura:
     enabled: true
     maxViolations: 5
     banTime: "1d"
+    kickThreshold: 20
+    humanReviewThreshold: 15
+    warningCooldownSecs: 2
+    notifyCooldownMs: 5000
   reach:
     enabled: true
     maxViolations: 5
     banTime: "2h"
+    kickThreshold: 20
+    humanReviewThreshold: 15
+    warningCooldownSecs: 2
+    notifyCooldownMs: 5000
 
 ban:
   minTime: "1m"

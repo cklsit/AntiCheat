@@ -30,25 +30,15 @@ public class ConfigManager {
     }
 
     private void loadConfigDefaults() {
-        config.addDefault("detection.fly.enabled", true);
-        config.addDefault("detection.fly.maxViolations", 5);
-        config.addDefault("detection.fly.banTime", "1h");
+        // 检测项默认值（包含细粒度封禁强度配置）
+        addDetectionDefaults("fly",      true, 5, "1h",  20, 15, 2, 5000);
+        addDetectionDefaults("speed",    true, 5, "30m", 20, 15, 2, 5000);
+        addDetectionDefaults("esp",      true, 3, "6h",  15, 10, 2, 5000);
+        addDetectionDefaults("killaura", true, 5, "1d",  20, 15, 2, 5000);
+        addDetectionDefaults("reach",    true, 5, "2h",  20, 15, 2, 5000);
 
-        config.addDefault("detection.speed.enabled", true);
-        config.addDefault("detection.speed.maxViolations", 5);
-        config.addDefault("detection.speed.banTime", "30m");
-
-        config.addDefault("detection.esp.enabled", true);
-        config.addDefault("detection.esp.maxViolations", 3);
-        config.addDefault("detection.esp.banTime", "6h");
-
-        config.addDefault("detection.killaura.enabled", true);
-        config.addDefault("detection.killaura.maxViolations", 5);
-        config.addDefault("detection.killaura.banTime", "1d");
-
-        config.addDefault("detection.reach.enabled", true);
-        config.addDefault("detection.reach.maxViolations", 5);
-        config.addDefault("detection.reach.banTime", "2h");
+        // 顶层通知节流（防刷屏）
+        config.addDefault("notify.throttleMs", 2000);
 
         config.addDefault("ban.minTime", "1m");
         config.addDefault("ban.maxTime", "1d");
@@ -62,6 +52,22 @@ public class ConfigManager {
 
         config.options().copyDefaults(true);
         plugin.saveConfig();
+    }
+
+    /**
+     * 批量为单个检测项写入默认值，避免重复样板代码。
+     */
+    private void addDetectionDefaults(String id, boolean enabled, int maxViolations, String banTime,
+                                      int kickThreshold, int humanReviewThreshold,
+                                      int warningCooldownSecs, int notifyCooldownMs) {
+        String prefix = "detection." + id + ".";
+        config.addDefault(prefix + "enabled", enabled);
+        config.addDefault(prefix + "maxViolations", maxViolations);
+        config.addDefault(prefix + "banTime", banTime);
+        config.addDefault(prefix + "kickThreshold", kickThreshold);
+        config.addDefault(prefix + "humanReviewThreshold", humanReviewThreshold);
+        config.addDefault(prefix + "warningCooldownSecs", warningCooldownSecs);
+        config.addDefault(prefix + "notifyCooldownMs", notifyCooldownMs);
     }
 
     // ===================== Web 面板配置 Getter =====================
@@ -228,5 +234,92 @@ public class ConfigManager {
 
     public String getBanTime(String type) {
         return config.getString("detection." + type + ".banTime", "1h");
+    }
+
+    // ===================== 细粒度封禁强度 Getter（供 Web 面板 / DecisionActionCenter 使用） =====================
+
+    /**
+     * 将时长字符串（"30s"/"5m"/"2h"/"1d"/"permanent"）解析为毫秒。
+     * 无法识别时返回 defMs。
+     */
+    public long parseDurationMs(String text, long defMs) {
+        if (text == null) {
+            return defMs;
+        }
+        String trimmed = text.trim().toLowerCase();
+        if (trimmed.isEmpty()) {
+            return defMs;
+        }
+        if ("permanent".equals(trimmed) || "perm".equals(trimmed) || "forever".equals(trimmed)) {
+            return Long.MAX_VALUE;
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^(\\d+)\\s*([smhd])$", java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(trimmed);
+        if (!m.matches()) {
+            return defMs;
+        }
+        long value = Long.parseLong(m.group(1));
+        char unit = Character.toLowerCase(m.group(2).charAt(0));
+        switch (unit) {
+            case 's': return value * 1000L;
+            case 'm': return value * 60_000L;
+            case 'h': return value * 3_600_000L;
+            case 'd': return value * 86_400_000L;
+            default:  return defMs;
+        }
+    }
+
+    /** 获取指定检测项的封禁时长（毫秒）；"permanent" 返回 Long.MAX_VALUE。 */
+    public long getBanTimeMs(String id, long defMs) {
+        return parseDurationMs(config.getString("detection." + id + ".banTime", null), defMs);
+    }
+
+    /** 获取指定检测项触发踢出的违规阈值。 */
+    public int getKickThreshold(String id, int def) {
+        return config.getInt("detection." + id + ".kickThreshold", def);
+    }
+
+    /** 获取指定检测项升级人工审核的违规阈值。 */
+    public int getHumanReviewThreshold(String id, int def) {
+        return config.getInt("detection." + id + ".humanReviewThreshold", def);
+    }
+
+    /** 获取指定检测项的警告消息冷却（秒）。 */
+    public int getWarningCooldownSecs(String id, int def) {
+        return config.getInt("detection." + id + ".warningCooldownSecs", def);
+    }
+
+    /** 获取指定检测项的通知冷却（毫秒）。 */
+    public long getNotifyCooldownMs(String id, long defMs) {
+        return config.getLong("detection." + id + ".notifyCooldownMs", defMs);
+    }
+
+    /** 获取全局通知节流间隔（毫秒），控制 DecisionActionCenter 同类消息最小重复间隔。 */
+    public long getGlobalNotifyThrottleMs(long defMs) {
+        return config.getLong("notify.throttleMs", defMs);
+    }
+
+    /** 设置指定检测项字段（Web 面板热更新用），值类型由调用方保证合法。 */
+    public void setDetectionField(String id, String field, Object value) {
+        config.set("detection." + id + "." + field, value);
+    }
+
+    /** 设置顶层字段（Web 面板热更新用）。 */
+    public void setField(String path, Object value) {
+        config.set(path, value);
+    }
+
+    /** 持久化配置到磁盘（必须在主线程调用）。 */
+    public void saveConfig() {
+        plugin.saveConfig();
+    }
+
+    /**
+     * 在 plugin.reloadConfig() 之后调用，让本类持有的 config 引用重新指向最新的 FileConfiguration。
+     * 必须在主线程调用。
+     */
+    public void refreshConfig() {
+        this.config = plugin.getConfig();
     }
 }

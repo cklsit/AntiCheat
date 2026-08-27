@@ -186,6 +186,33 @@ export interface Page<T> {
   pages: number
 }
 
+// ==================== 检测模块配置 ====================
+/**
+ * 与后端 ConfigModuleDTO 对齐。
+ * 真实配置字段：与 config.yml 中 detection.<id>.* 一一对应。
+ * 派生字段：autoBan / humanReview 仅为旧 UI 兼容。
+ */
+export interface ConfigModule {
+  id: string
+  name: string
+  module: string
+  enabled: boolean
+  maxViolations: number
+  /** 封禁时长字符串："30m" / "1h" / "1d" / "permanent" */
+  banTime: string
+  /** 达到该违规数时踢出 */
+  kickThreshold: number
+  /** 达到该违规数时升级人工审核 */
+  humanReviewThreshold: number
+  /** 警告消息冷却（秒） */
+  warningCooldownSecs: number
+  /** 检测通知冷却（毫秒） */
+  notifyCooldownMs: number
+  // 派生字段（旧 UI 兼容）
+  autoBan: number
+  humanReview: number
+}
+
 // ==================== 登录相关 ====================
 export interface LoginPayload {
   username: string

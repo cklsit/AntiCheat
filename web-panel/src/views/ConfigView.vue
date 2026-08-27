@@ -1,21 +1,51 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
 import {
   Settings2, ShieldAlert, Shield, Bell, Server, Database, Globe, Save, RotateCcw,
   ShieldCheck, Lock, Unlock, AlertTriangle
 } from 'lucide-vue-next'
 import { scoreToHexColor } from '@/utils/risk'
+import { request } from '@/api/request'
+import type { ConfigModule } from '@/types'
 
-interface Threshold { name: string; module: string; autoBan: number; humanReview: number; enabled: boolean }
+/** 单条检测项阈值行（与后端 ConfigModuleDTO 对齐，含前端可视化派生字段） */
+interface Threshold {
+  id: string
+  name: string
+  module: string
+  enabled: boolean
+  maxViolations: number
+  banTime: string
+  kickThreshold: number
+  humanReviewThreshold: number
+  warningCooldownSecs: number
+  notifyCooldownMs: number
+  autoBan: number
+  humanReview: number
+}
 
-const thresholds = reactive<Threshold[]>([
-  { name: '战斗 / KillAura', module: 'KillAura', autoBan: 92, humanReview: 70, enabled: true },
-  { name: '移动 / 速度',   module: 'Speed',   autoBan: 95, humanReview: 75, enabled: true },
-  { name: '移动 / 飞行',   module: 'Fly',     autoBan: 90, humanReview: 70, enabled: true },
-  { name: '搭建 / Scaffold', module: 'Scaffold', autoBan: 88, humanReview: 65, enabled: true },
-  { name: '交互 / Reach',   module: 'Reach',    autoBan: 85, humanReview: 60, enabled: true },
-  { name: '挖掘 / FastBreak', module: 'FastBreak', autoBan: 90, humanReview: 70, enabled: false }
-])
+/** 封禁时长可选项 */
+const BAN_TIME_OPTIONS = [
+  { label: '10 分钟', value: '10m' },
+  { label: '30 分钟', value: '30m' },
+  { label: '1 小时', value: '1h' },
+  { label: '6 小时', value: '6h' },
+  { label: '1 天', value: '1d' },
+  { label: '7 天', value: '7d' },
+  { label: '永久封禁', value: 'permanent' }
+]
+
+/** 兜底默认值（API 失败时使用） */
+const FALLBACK_THRESHOLDS: Threshold[] = [
+  { id: 'killaura',  name: '战斗 / KillAura',  module: 'killaura',  enabled: true,  maxViolations: 5, banTime: '1d',  kickThreshold: 20, humanReviewThreshold: 15, warningCooldownSecs: 2, notifyCooldownMs: 5000, autoBan: 100, humanReview: 80 },
+  { id: 'speed',    name: '移动 / 速度',       module: 'speed',     enabled: true,  maxViolations: 5, banTime: '30m', kickThreshold: 20, humanReviewThreshold: 15, warningCooldownSecs: 2, notifyCooldownMs: 5000, autoBan: 100, humanReview: 80 },
+  { id: 'fly',      name: '移动 / 飞行',       module: 'fly',       enabled: true,  maxViolations: 5, banTime: '1h',  kickThreshold: 20, humanReviewThreshold: 15, warningCooldownSecs: 2, notifyCooldownMs: 5000, autoBan: 100, humanReview: 80 },
+  { id: 'esp',      name: '视觉 / ESP',        module: 'esp',       enabled: true,  maxViolations: 3, banTime: '6h',  kickThreshold: 15, humanReviewThreshold: 10, warningCooldownSecs: 2, notifyCooldownMs: 5000, autoBan: 80,  humanReview: 60 },
+  { id: 'reach',    name: '交互 / Reach',      module: 'reach',     enabled: true,  maxViolations: 5, banTime: '2h',  kickThreshold: 20, humanReviewThreshold: 15, warningCooldownSecs: 2, notifyCooldownMs: 5000, autoBan: 100, humanReview: 80 },
+  { id: 'scaffold', name: '搭建 / Scaffold',   module: 'scaffold',  enabled: false, maxViolations: 5, banTime: '2h',  kickThreshold: 20, humanReviewThreshold: 15, warningCooldownSecs: 2, notifyCooldownMs: 5000, autoBan: 100, humanReview: 80 }
+]
+
+const thresholds = reactive<Threshold[]>(FALLBACK_THRESHOLDS.map(t => ({ ...t })))
 
 const system = reactive({
   serverName: 'AntiCheat Command Center',
@@ -34,16 +64,95 @@ const system = reactive({
 })
 
 const changes = ref(0)
+const loading = ref(false)
+const saving = ref(false)
+const toast = ref<{ type: 'success' | 'error' | 'info'; message: string } | null>(null)
+
+function showToast(type: 'success' | 'error' | 'info', message: string): void {
+  toast.value = { type, message }
+  setTimeout(() => { toast.value = null }, 3000)
+}
 
 function markDirty(): void { changes.value += 1 }
+
+/** 从后端拉取检测项配置覆盖本地 */
+async function loadConfig(): Promise<void> {
+  loading.value = true
+  try {
+    const list = await request.get<ConfigModule[]>('/config/modules')
+    if (Array.isArray(list) && list.length > 0) {
+      // 用真实数据覆盖本地兜底
+      thresholds.splice(0, thresholds.length, ...list.map(m => ({
+        id: m.id,
+        name: m.name,
+        module: m.module,
+        enabled: m.enabled,
+        maxViolations: m.maxViolations ?? 5,
+        banTime: m.banTime ?? '1h',
+        kickThreshold: m.kickThreshold ?? 20,
+        humanReviewThreshold: m.humanReviewThreshold ?? 15,
+        warningCooldownSecs: m.warningCooldownSecs ?? 2,
+        notifyCooldownMs: m.notifyCooldownMs ?? 5000,
+        autoBan: m.autoBan ?? 100,
+        humanReview: m.humanReview ?? 80
+      })))
+    }
+  } catch (e) {
+    // 静默失败，保留兜底数据
+    // eslint-disable-next-line no-console
+    console.warn('[ConfigView] 加载检测项配置失败，使用兜底数据', e)
+  } finally {
+    loading.value = false
+  }
+}
+
 function reset(): void {
-  // 简单提示
-  changes.value = 0
+  loadConfig().then(() => {
+    changes.value = 0
+    showToast('info', '已重置为服务器最新配置')
+  })
 }
-function save(): void {
-  // 模拟保存
-  changes.value = 0
+
+/** 保存所有改动到后端，逐行 PUT，并触发热加载 */
+async function save(): Promise<void> {
+  if (saving.value) return
+  saving.value = true
+  let failed = 0
+  for (const t of thresholds) {
+    try {
+      await request.put(`/config/modules/${t.id}`, {
+        id: t.id,
+        name: t.name,
+        module: t.module,
+        enabled: t.enabled,
+        maxViolations: t.maxViolations,
+        banTime: t.banTime,
+        kickThreshold: t.kickThreshold,
+        humanReviewThreshold: t.humanReviewThreshold,
+        warningCooldownSecs: t.warningCooldownSecs,
+        notifyCooldownMs: t.notifyCooldownMs
+      })
+    } catch (e) {
+      failed++
+      // eslint-disable-next-line no-console
+      console.error('[ConfigView] 保存失败', t.id, e)
+    }
+  }
+  saving.value = false
+  if (failed === 0) {
+    changes.value = 0
+    showToast('success', '所有检测项配置已保存并热加载')
+  } else if (failed < thresholds.length) {
+    changes.value = failed
+    showToast('error', `${failed} 项保存失败，其余已保存并热加载`)
+  } else {
+    showToast('error', '保存失败，请检查网络或权限')
+  }
 }
+
+onMounted(() => {
+  loadConfig()
+})
 </script>
 
 <template>
@@ -61,10 +170,18 @@ function save(): void {
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr><th style="width: 200px;">模块</th><th>启用</th><th>人工审理阈值</th><th>自动封禁阈值</th><th style="width: 220px;">区间可视化</th></tr>
+              <tr>
+                <th style="width: 180px;">模块</th>
+                <th>启用</th>
+                <th style="width: 130px;">封禁时长</th>
+                <th style="width: 110px;">警告冷却(秒)</th>
+                <th>人工审理阈值</th>
+                <th>自动封禁阈值</th>
+                <th style="width: 200px;">区间可视化</th>
+              </tr>
             </thead>
             <tbody>
-              <tr v-for="t in thresholds" :key="t.module" :class="{ 'opacity-50': !t.enabled }">
+              <tr v-for="t in thresholds" :key="t.id" :class="{ 'opacity-50': !t.enabled }">
                 <td>
                   <label class="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" class="w-4 h-4" v-model="t.enabled" @change="markDirty"/>
@@ -73,14 +190,22 @@ function save(): void {
                 </td>
                 <td><span class="tag" :class="t.enabled ? 'tag-green' : 'tag-gray'">{{ t.enabled ? '运行中' : '已停用' }}</span></td>
                 <td>
+                  <select v-model="t.banTime" :disabled="!t.enabled" class="input text-caption py-1" @change="markDirty">
+                    <option v-for="opt in BAN_TIME_OPTIONS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                  </select>
+                </td>
+                <td>
+                  <input type="number" min="1" max="60" v-model.number="t.warningCooldownSecs" :disabled="!t.enabled" class="input font-mono text-caption py-1 w-20" @input="markDirty"/>
+                </td>
+                <td>
                   <div class="flex items-center gap-3">
-                    <input type="range" min="40" max="100" v-model.number="t.humanReview" :disabled="!t.enabled" class="w-40" @input="markDirty"/>
+                    <input type="range" min="40" max="100" v-model.number="t.humanReview" :disabled="!t.enabled" class="w-32" @input="markDirty"/>
                     <span class="font-mono text-sm" style="color: var(--warning);">{{ t.humanReview }}</span>
                   </div>
                 </td>
                 <td>
                   <div class="flex items-center gap-3">
-                    <input type="range" min="40" max="100" v-model.number="t.autoBan" :disabled="!t.enabled" class="w-40" @input="markDirty"/>
+                    <input type="range" min="40" max="100" v-model.number="t.autoBan" :disabled="!t.enabled" class="w-32" @input="markDirty"/>
                     <span class="font-mono text-sm" style="color: var(--danger-red);">{{ t.autoBan }}</span>
                   </div>
                 </td>
@@ -205,19 +330,40 @@ function save(): void {
       </div>
     </div>
 
+    <!-- Toast 提示 -->
+    <transition name="fade">
+      <div v-if="toast" class="fixed top-4 right-4 z-50 px-4 py-3 rounded-card shadow-lg flex items-center gap-2"
+           :style="toast.type === 'success' ? 'background: var(--success); color: #fff;'
+                 : toast.type === 'error'   ? 'background: var(--danger-red); color: #fff;'
+                                            : 'background: var(--accent-blue); color: #fff;'">
+        <ShieldCheck v-if="toast.type === 'success'" :size="16"/>
+        <AlertTriangle v-else-if="toast.type === 'error'" :size="16"/>
+        <Bell v-else :size="16"/>
+        <span class="text-sm font-medium">{{ toast.message }}</span>
+      </div>
+    </transition>
+
     <!-- 底部保存 -->
     <div class="sticky bottom-0 card">
       <div class="card-body flex flex-wrap items-center justify-between gap-3">
         <div class="text-caption text-text-secondary">
-          <template v-if="changes > 0">
+          <template v-if="loading">
+            <span class="inline-block w-3 h-3 rounded-full border-2 border-text-secondary border-t-transparent animate-spin align-middle mr-1"></span>
+            正在加载服务器配置...
+          </template>
+          <template v-else-if="changes > 0">
             <AlertTriangle :size="14" class="inline mr-1" style="color: var(--warning);"/>
             存在 <span class="font-mono text-warning">{{ changes }}</span> 处未保存的修改。
           </template>
           <template v-else>所有修改已保存。</template>
         </div>
         <div class="flex gap-2">
-          <button class="btn btn-secondary" @click="reset"><RotateCcw :size="14"/> 重置</button>
-          <button class="btn btn-primary" @click="save"><Save :size="14"/> 保存并生效</button>
+          <button class="btn btn-secondary" :disabled="loading || saving" @click="reset"><RotateCcw :size="14"/> 重置</button>
+          <button class="btn btn-primary" :disabled="loading || saving" @click="save">
+            <Save :size="14"/>
+            <span v-if="saving">保存中...</span>
+            <span v-else>保存并热加载</span>
+          </button>
         </div>
       </div>
     </div>

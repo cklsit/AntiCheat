@@ -49,12 +49,28 @@ public class ConfigHandler extends AbstractHandler {
         for (String[] m : MODULES) {
             String key = m[0];
             String name = m[1];
-            boolean enabled = plugin.getConfigManager().isDetectionEnabled(key);
-            int max = plugin.getConfigManager().getMaxViolations(key);
-            int autoBan = 50 + max * 10;  // 简单派生：1→60, 5→100
+            var cm = plugin.getConfigManager();
+            boolean enabled = cm.isDetectionEnabled(key);
+            int maxViolations = cm.getMaxViolations(key);
+            String banTime = cm.getBanTime(key);
+            int kickThreshold = cm.getKickThreshold(key, 20);
+            int humanReviewThreshold = cm.getHumanReviewThreshold(key, 15);
+            int warningCooldownSecs = cm.getWarningCooldownSecs(key, 2);
+            long notifyCooldownMs = cm.getNotifyCooldownMs(key, 5000L);
+
+            // 派生字段（向后兼容旧前端 UI）
+            int autoBan = 50 + maxViolations * 10;
             if (autoBan > 100) autoBan = 100;
             int humanReview = Math.max(40, autoBan - 20);
-            list.add(new ConfigModuleDTO(key, name, key, enabled, autoBan, humanReview));
+
+            ConfigModuleDTO dto = new ConfigModuleDTO(key, name, key, enabled, autoBan, humanReview);
+            dto.maxViolations = maxViolations;
+            dto.banTime = banTime;
+            dto.kickThreshold = kickThreshold;
+            dto.humanReviewThreshold = humanReviewThreshold;
+            dto.warningCooldownSecs = warningCooldownSecs;
+            dto.notifyCooldownMs = notifyCooldownMs;
+            list.add(dto);
         }
         ok(ctx, list);
     }
@@ -62,6 +78,15 @@ public class ConfigHandler extends AbstractHandler {
     private void update(Context ctx) {
         if (!AuthHandler.require(ctx, Permission.CONFIG_UPDATE)) return;
         String id = ctx.pathParam("id");
+        // 校验 id 合法
+        boolean validId = false;
+        for (String[] m : MODULES) {
+            if (m[0].equals(id)) { validId = true; break; }
+        }
+        if (!validId) {
+            fail(ctx, 400, "未知检测模块 id: " + id);
+            return;
+        }
         ConfigModuleDTO payload = JsonMapper.fromJson(ctx.body(), ConfigModuleDTO.class);
         if (payload == null) {
             fail(ctx, 400, "请求体非法");
@@ -69,15 +94,46 @@ public class ConfigHandler extends AbstractHandler {
         }
         // 切回主线程保存 config（避免 Bukkit API 警告）
         BukkitBridge.syncRun(plugin, () -> {
-            plugin.getConfig().set("detection." + id + ".enabled", payload.enabled);
-            if (payload.autoBan > 0) {
+            String prefix = "detection." + id + ".";
+            // 真实字段直接写
+            plugin.getConfig().set(prefix + "enabled", payload.enabled);
+            if (payload.maxViolations > 0) {
+                plugin.getConfig().set(prefix + "maxViolations", payload.maxViolations);
+            } else if (payload.autoBan > 0) {
+                // 兼容旧 UI：从 autoBan 反推 maxViolations
                 int maxViolations = Math.max(1, (payload.autoBan - 50) / 10);
-                plugin.getConfig().set("detection." + id + ".maxViolations", maxViolations);
+                plugin.getConfig().set(prefix + "maxViolations", maxViolations);
+            }
+            if (payload.banTime != null && !payload.banTime.isEmpty()) {
+                plugin.getConfig().set(prefix + "banTime", payload.banTime);
+            }
+            if (payload.kickThreshold > 0) {
+                plugin.getConfig().set(prefix + "kickThreshold", payload.kickThreshold);
+            }
+            if (payload.humanReviewThreshold > 0) {
+                plugin.getConfig().set(prefix + "humanReviewThreshold", payload.humanReviewThreshold);
+            } else if (payload.humanReview > 0) {
+                // 兼容旧 UI：旧字段映射到新字段
+                plugin.getConfig().set(prefix + "humanReviewThreshold", payload.humanReview);
+            }
+            if (payload.warningCooldownSecs > 0) {
+                plugin.getConfig().set(prefix + "warningCooldownSecs", payload.warningCooldownSecs);
+            }
+            if (payload.notifyCooldownMs > 0) {
+                plugin.getConfig().set(prefix + "notifyCooldownMs", payload.notifyCooldownMs);
             }
             plugin.saveConfig();
+            // reload 让磁盘与内存一致，并刷新 ConfigManager 缓存的 config 引用
+            plugin.reloadConfig();
+            plugin.getConfigManager().refreshConfig();
         });
         audit(ctx, "config_change", id, "success",
-                "enabled=" + payload.enabled + " autoBan=" + payload.autoBan + " humanReview=" + payload.humanReview);
+                "enabled=" + payload.enabled
+                        + " banTime=" + payload.banTime
+                        + " kickThreshold=" + payload.kickThreshold
+                        + " humanReviewThreshold=" + payload.humanReviewThreshold
+                        + " warningCooldownSecs=" + payload.warningCooldownSecs
+                        + " notifyCooldownMs=" + payload.notifyCooldownMs);
         ok(ctx, payload);
     }
 }

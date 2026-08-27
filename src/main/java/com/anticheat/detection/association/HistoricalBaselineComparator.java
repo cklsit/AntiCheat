@@ -14,13 +14,31 @@ public class HistoricalBaselineComparator {
     private static final double DEFAULT_CHANGE_THRESHOLD = 2.5;
     private static final int MIN_BASELINE_SAMPLES = 20;
     private static final long BASELINE_AGE_LIMIT = 30L * 24 * 60 * 60 * 1000;
+    /** 每类验证消息默认冷却，避免刷屏（毫秒）。 */
+    private static final long VERIFY_NOTIFY_COOLDOWN_MS = 5000L;
 
     private final Map<UUID, List<BaselineSnapshot>> historicalBaselines;
     private final ProfileManager profileManager;
+    /** 验证消息节流：notifyKey -> (player -> lastSentMs) */
+    private final Map<String, Map<UUID, Long>> verifyLastSent = new ConcurrentHashMap<>();
 
     public HistoricalBaselineComparator(ProfileManager profileManager) {
         this.profileManager = profileManager;
         this.historicalBaselines = new ConcurrentHashMap<>();
+    }
+
+    /** 验证消息节流：同一玩家同一类提示 5s 内最多一次。返回 true 表示允许发送。 */
+    private boolean canSendVerifyNotify(UUID playerUuid, String notifyKey, long cooldownMs) {
+        Map<UUID, Long> bucket = verifyLastSent.computeIfAbsent(notifyKey,
+                k -> Collections.synchronizedMap(new LinkedHashMap<UUID, Long>(16, 0.75f, true) {
+                    @Override protected boolean removeEldestEntry(Map.Entry<UUID, Long> eldest) { return size() > 3000; }
+                    private static final long serialVersionUID = 1L;
+                }));
+        long now = System.currentTimeMillis();
+        Long last = bucket.get(playerUuid);
+        if (last != null && (now - last) < cooldownMs) return false;
+        bucket.put(playerUuid, now);
+        return true;
     }
 
     public double compareBaselines(UUID playerUUID) {
@@ -66,7 +84,9 @@ public class HistoricalBaselineComparator {
     public void triggerVerification(UUID playerUUID) {
         Player player = Bukkit.getPlayer(playerUUID);
         if (player != null) {
-            player.sendMessage("§c[反作弊] 检测到异常行为，请完成二次验证。");
+            if (canSendVerifyNotify(playerUUID, "TRIGGER_VERIFY", VERIFY_NOTIFY_COOLDOWN_MS)) {
+                player.sendMessage("§c[反作弊] 检测到异常行为，请完成二次验证。");
+            }
             scheduleVerificationTask(playerUUID);
         }
     }
@@ -99,21 +119,21 @@ public class HistoricalBaselineComparator {
 
     private void sendCaptchaChallenge(UUID playerUUID) {
         Player player = Bukkit.getPlayer(playerUUID);
-        if (player != null) {
+        if (player != null && canSendVerifyNotify(playerUUID, "CAPTCHA_CHALLENGE", VERIFY_NOTIFY_COOLDOWN_MS)) {
             player.sendMessage("§6[验证] 请完成验证码测试以继续游戏。");
         }
     }
 
     private void sendBehaviorQuestionnaire(UUID playerUUID) {
         Player player = Bukkit.getPlayer(playerUUID);
-        if (player != null) {
+        if (player != null && canSendVerifyNotify(playerUUID, "BEHAVIOR_QUESTION", VERIFY_NOTIFY_COOLDOWN_MS)) {
             player.sendMessage("§6[验证] 请回答几个问题以验证您的身份。");
         }
     }
 
     private void requestManualVerification(UUID playerUUID) {
         Player player = Bukkit.getPlayer(playerUUID);
-        if (player != null) {
+        if (player != null && canSendVerifyNotify(playerUUID, "MANUAL_VERIFY", VERIFY_NOTIFY_COOLDOWN_MS)) {
             player.sendMessage("§6[验证] 管理员将在稍后联系您进行人工验证。");
         }
     }
